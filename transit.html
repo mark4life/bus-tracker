@@ -64,6 +64,10 @@
   .status-dot.err { background:var(--danger); }
   .head-right { display:flex; align-items:center; gap:10px; }
   .remove-btn { background:none; border:none; color:var(--danger); font-size:14px; padding:0 2px; cursor:pointer; }
+  .bell-btn { background:none; border:none; color:var(--text-dim); font-size:14px; padding:0 2px; cursor:pointer; }
+  .bell-btn.active { color:var(--warm); }
+  .notify-row { display:flex; align-items:center; gap:6px; padding:8px 14px; background:var(--panel-raised); border-bottom:1px solid var(--line); font-size:11px; color:var(--text-dim); }
+  .notify-row input[type="number"] { width:50px; background:#fbfcfa; border:1px solid var(--line); border-radius:3px; padding:3px 6px; font-family:var(--mono); font-size:12px; color:var(--text-mid); }
 
   .pred-row { display:grid; grid-template-columns:48px 1fr auto; gap:10px; align-items:center; padding:9px 14px; border-bottom:1px solid var(--line); }
   .pred-row:last-child { border-bottom:none; }
@@ -109,6 +113,7 @@
 
     <div class="row2">
       <button onclick="useGPS()" id="gpsBtn">📍 Find stops near me</button>
+      <button class="ghost" onclick="requestNotifyPermission()" id="notifyPermBtn">🔔 Enable notifications</button>
     </div>
     <div id="gpsStatus"></div>
     <div id="nearbyList"></div>
@@ -144,6 +149,19 @@ const STOPS_STORAGE = 'wmata_saved_stops';
 
 const stopMaps = {};      // stopId -> {map, userMarker, stopMarker, busMarkers:{}}
 const stopRouteIds = {};  // stopId -> Set of RouteIDs currently serving it
+const notifyArmed = {};   // stopId -> bool, true = ok to fire next time threshold is met
+
+function requestNotifyPermission() {
+  if (!('Notification' in window)) {
+    alert('This browser does not support notifications.');
+    return;
+  }
+  Notification.requestPermission().then(perm => {
+    const btn = document.getElementById('notifyPermBtn');
+    if (perm === 'granted') { btn.textContent = '🔔 Notifications on'; }
+    else { btn.textContent = '🔕 Notifications blocked'; }
+  });
+}
 
 function toggleSetup() { document.getElementById('setup').classList.toggle('collapsed'); }
 
@@ -174,7 +192,10 @@ function loadStorage() {
       apiKey = savedKey;
     }
     const savedStopsRaw = localStorage.getItem(STOPS_STORAGE);
-    if (savedStopsRaw) savedStops = JSON.parse(savedStopsRaw);
+    if (savedStopsRaw) {
+      savedStops = JSON.parse(savedStopsRaw);
+      savedStops.forEach(s => { if (s.notify) notifyArmed[s.id] = true; });
+    }
   } catch (e) { /* storage unavailable (e.g. inline preview sandbox), ignore */ }
 }
 function persistStops() {
@@ -302,8 +323,14 @@ function renderBoard() {
       <div class="stop-card-head" onclick="toggleMap('${s.id}')">
         <h3><span class="status-dot" id="dot-${s.id}"></span>${escapeHtml(s.name)} <span class="stop-sub">#${escapeHtml(s.id)}</span></h3>
         <div class="head-right">
+          <button class="bell-btn ${s.notify ? 'active' : ''}" id="bell-${s.id}" onclick="event.stopPropagation(); toggleNotify('${s.id}')">${s.notify ? '🔔' : '🔕'}</button>
           <button class="remove-btn" onclick="event.stopPropagation(); removeStop('${s.id}')">✕</button>
         </div>
+      </div>
+      <div class="notify-row" id="notifyrow-${s.id}" style="display:${s.notify ? 'flex' : 'none'};">
+        Notify me when bus is within
+        <input type="number" min="1" max="30" value="${s.notifyThreshold || 3}" id="thresh-${s.id}" onclick="event.stopPropagation()" onchange="updateThreshold('${s.id}', this.value)">
+        min
       </div>
       <div class="predictions" id="pred-${s.id}"><div class="empty-row">loading…</div></div>
       <div class="map-toggle" id="maptoggle-${s.id}" onclick="toggleMap('${s.id}')">▾ show live map</div>
@@ -311,6 +338,61 @@ function renderBoard() {
     `;
     board.appendChild(card);
   });
+}
+
+function toggleNotify(id) {
+  const stop = savedStops.find(s => s.id === id);
+  if (!stop) return;
+
+  if (!stop.notify && Notification.permission !== 'granted') {
+    Notification.requestPermission().then(perm => {
+      if (perm === 'granted') { stop.notify = true; finishToggleNotify(id, stop); }
+      else { alert('Notifications are blocked. Enable them in your browser/site settings to use this.'); }
+    });
+    return;
+  }
+  stop.notify = !stop.notify;
+  finishToggleNotify(id, stop);
+}
+
+function finishToggleNotify(id, stop) {
+  if (!stop.notifyThreshold) stop.notifyThreshold = 3;
+  notifyArmed[id] = true;
+  persistStops();
+  const bell = document.getElementById('bell-' + id);
+  const row = document.getElementById('notifyrow-' + id);
+  bell.textContent = stop.notify ? '🔔' : '🔕';
+  bell.classList.toggle('active', stop.notify);
+  row.style.display = stop.notify ? 'flex' : 'none';
+}
+
+function updateThreshold(id, val) {
+  const stop = savedStops.find(s => s.id === id);
+  if (!stop) return;
+  stop.notifyThreshold = Math.max(1, parseInt(val, 10) || 3);
+  notifyArmed[id] = true;
+  persistStops();
+}
+
+function maybeNotify(stop, soonestMinutes, routeId, direction) {
+  if (!stop.notify || soonestMinutes === null) return;
+  const threshold = stop.notifyThreshold || 3;
+
+  if (soonestMinutes <= threshold) {
+    if (notifyArmed[stop.id]) {
+      notifyArmed[stop.id] = false;
+      try {
+        new Notification(`Bus approaching: ${stop.name}`, {
+          body: `Route ${routeId} (${direction}) in ${soonestMinutes} min`,
+          icon: '',
+          tag: 'wmata-' + stop.id
+        });
+      } catch (e) { /* notification failed, ignore */ }
+    }
+  } else if (soonestMinutes > threshold + 5) {
+    // Bus window has passed -- re-arm so the next approaching bus can notify again
+    notifyArmed[stop.id] = true;
+  }
 }
 
 function toggleMap(id) {
@@ -409,6 +491,12 @@ async function fetchStopPredictions(stop) {
 
     const mapEl = document.getElementById('map-' + stop.id);
     if (mapEl && mapEl.classList.contains('open')) updateStopMapBuses(stop.id);
+
+    if (preds.length > 0) {
+      const soonest = preds[0];
+      const soonestMinutes = soonest.Minutes === '' || soonest.Minutes === undefined ? null : Number(soonest.Minutes);
+      maybeNotify(stop, soonestMinutes, soonest.RouteID, soonest.DirectionText);
+    }
 
   } catch (err) {
     if (dot) dot.classList.add('err');
