@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>My Stops // WMATA</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --bg: #f5f6f3;
+    --panel: #ffffff;
+    --panel-raised: #eef0ea;
+    --accent: #0a4fa8;
+    --accent-dim: #b9cbe8;
+    --warm: #c85a10;
+    --text-dim: #6b7069;
+    --text-mid: #23261f;
+    --line: #dcdfd7;
+    --danger: #c73224;
+    --good: #1f7a3d;
+    --mono: 'SF Mono', 'IBM Plex Mono', 'Courier New', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; padding:0; background: var(--bg); color: var(--text-mid); font-family: var(--sans); }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 16px 14px 60px; display:flex; flex-direction:column; gap:12px; }
+
+  header { display:flex; align-items:center; justify-content:space-between; padding-bottom:10px; border-bottom:1px solid var(--line); }
+  header h1 { font-family: var(--mono); font-size:14px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); margin:0; }
+  header h1 span { color:var(--text-dim); font-weight:normal; }
+  #gear { background:none; border:none; color:var(--text-dim); font-size:16px; padding:2px 4px; cursor:pointer; }
+  #gear:hover { color:var(--accent); }
+
+  #setup { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:14px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  #setup.collapsed { display:none; }
+  label { display:block; font-size:11px; color:var(--text-dim); letter-spacing:.04em; margin-bottom:5px; font-weight:600; }
+  input[type="text"] { width:100%; background:#fbfcfa; border:1px solid var(--line); color:var(--text-mid); font-family:var(--mono); font-size:13px; padding:9px 10px; border-radius:4px; outline:none; }
+  input[type="text"]:focus { border-color:var(--accent); }
+  .field { margin-bottom:12px; }
+  .row2 { display:flex; gap:8px; align-items:flex-end; }
+  .row2 .field { flex:1; margin-bottom:0; }
+  .remember-row { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim); margin-top:4px; }
+  .remember-row input { width:auto; }
+
+  button { font-family:var(--sans); font-size:12px; font-weight:700; border:1px solid var(--accent); background:var(--accent); color:#fff; padding:9px 16px; border-radius:4px; cursor:pointer; white-space:nowrap; }
+  button:hover { opacity:.9; } button:active { transform:translateY(1px); } button:disabled { opacity:.4; cursor:default; }
+  button.ghost { background:transparent; color:var(--accent); }
+  button.small { padding:6px 10px; font-size:11px; }
+
+  #gpsStatus { font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:8px; min-height:14px; }
+  #gpsStatus.err { color:var(--danger); } #gpsStatus.ok { color:var(--good); }
+
+  #nearbyList { margin-top:10px; display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto; }
+  .nearby-row { display:flex; justify-content:space-between; align-items:center; background:var(--panel-raised); border:1px solid var(--line); border-radius:4px; padding:8px 10px; }
+  .nearby-row .info { font-size:12px; }
+  .nearby-row .sub { display:block; font-family:var(--mono); font-size:10px; color:var(--text-dim); margin-top:2px; }
+
+  #stopsBoard { display:flex; flex-direction:column; gap:14px; }
+  .stop-card { background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .stop-card-head { display:flex; justify-content:space-between; align-items:center; padding:11px 14px; background:var(--panel-raised); border-bottom:1px solid var(--line); cursor:pointer; }
+  .stop-card-head h3 { margin:0; font-size:13px; }
+  .stop-card-head .stop-sub { font-family:var(--mono); font-size:10px; color:var(--text-dim); }
+  .status-dot { width:6px; height:6px; border-radius:50%; background:var(--good); display:inline-block; margin-right:6px; }
+  .status-dot.err { background:var(--danger); }
+  .head-right { display:flex; align-items:center; gap:10px; }
+  .remove-btn { background:none; border:none; color:var(--danger); font-size:14px; padding:0 2px; cursor:pointer; }
+
+  .pred-row { display:grid; grid-template-columns:48px 1fr auto; gap:10px; align-items:center; padding:9px 14px; border-bottom:1px solid var(--line); }
+  .pred-row:last-child { border-bottom:none; }
+  .route-badge { font-family:var(--mono); font-size:12px; font-weight:700; color:#fff; background:var(--accent); text-align:center; padding:3px 0; border-radius:3px; }
+  .dest { font-size:13px; }
+  .eta { font-family:var(--mono); font-size:20px; font-weight:700; color:var(--warm); text-align:right; min-width:56px; }
+  .eta small { font-size:10px; font-weight:400; color:var(--text-dim); margin-left:2px; }
+
+  .empty-row, .error-row { padding:16px 14px; font-size:12px; color:var(--text-dim); font-family:var(--mono); }
+  .error-row { color:var(--danger); }
+
+  .map-toggle { padding:9px 14px; font-size:11px; color:var(--accent); font-family:var(--mono); cursor:pointer; border-top:1px solid var(--line); }
+  .stop-map { height:220px; width:100%; display:none; }
+  .stop-map.open { display:block; }
+
+  #placeholder { text-align:center; padding:50px 20px; color:var(--text-dim); font-size:13px; line-height:1.6; }
+  #placeholder .big { font-family:var(--mono); color:var(--accent); font-size:26px; display:block; margin-bottom:10px; letter-spacing:.1em; }
+
+  footer { text-align:center; font-size:10px; color:var(--text-dim); font-family:var(--mono); letter-spacing:.05em; }
+
+  .user-marker { width:14px; height:14px; border-radius:50%; background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 2px var(--accent-dim); }
+  .stop-marker-icon { width:12px; height:12px; border-radius:50%; background:#fff; border:2px solid var(--text-mid); }
+  .bus-marker { width:18px; height:18px; border-radius:4px; background:var(--warm); border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.3); display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:8px; font-weight:700; color:#fff; }
+  .leaflet-popup-content-wrapper { background:var(--panel); color:var(--text-mid); font-family:var(--mono); font-size:11px; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MY STOPS <span>// WMATA</span></h1>
+    <button id="gear" onclick="toggleSetup()" title="Settings / add stops" style="background:none;border:none;color:var(--text-dim);width:auto;">⚙</button>
+  </header>
+
+  <div id="setup">
+    <div class="field">
+      <label for="apiKey">WMATA API Key</label>
+      <input type="text" id="apiKey" placeholder="paste your key" autocomplete="off">
+    </div>
+    <div class="remember-row" style="margin-bottom:14px;">
+      <input type="checkbox" id="rememberKey">
+      <label for="rememberKey" style="margin:0;">Remember API key on this device</label>
+    </div>
+
+    <div class="row2">
+      <button onclick="useGPS()" id="gpsBtn">📍 Find stops near me</button>
+    </div>
+    <div id="gpsStatus"></div>
+    <div id="nearbyList"></div>
+
+    <div class="row2" style="margin-top:16px; border-top:1px solid var(--line); padding-top:14px;">
+      <div class="field">
+        <label for="manualStopId">Or add a Stop ID manually</label>
+        <input type="text" id="manualStopId" placeholder="e.g. 1001195" inputmode="numeric">
+      </div>
+      <button class="ghost" onclick="addManualStop()">Add</button>
+    </div>
+  </div>
+
+  <div id="stopsBoard"></div>
+
+  <div id="placeholder">
+    <span class="big">&gt;_</span>
+    Tap the gear above, allow location access, and add stops near you.
+  </div>
+
+  <footer>predictions refresh every 25s · data via api.wmata.com</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+let apiKey = '';
+let userLoc = null;
+let savedStops = [];   // {id, name, lat, lon}
+let predTimer = null;
+const REFRESH_MS = 25000;
+const KEY_STORAGE = 'wmata_api_key';
+const STOPS_STORAGE = 'wmata_saved_stops';
+
+const stopMaps = {};      // stopId -> {map, userMarker, stopMarker, busMarkers:{}}
+const stopRouteIds = {};  // stopId -> Set of RouteIDs currently serving it
+
+function toggleSetup() { document.getElementById('setup').classList.toggle('collapsed'); }
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function formatDistance(meters) {
+  const feet = meters * 3.28084;
+  if (feet < 1000) return Math.round(feet) + ' ft';
+  return (meters/1609.34).toFixed(1) + ' mi';
+}
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str == null ? '' : String(str);
+  return d.innerHTML;
+}
+
+// --- Persistence ---
+function loadStorage() {
+  try {
+    const savedKey = localStorage.getItem(KEY_STORAGE);
+    if (savedKey) {
+      document.getElementById('apiKey').value = savedKey;
+      document.getElementById('rememberKey').checked = true;
+      apiKey = savedKey;
+    }
+    const savedStopsRaw = localStorage.getItem(STOPS_STORAGE);
+    if (savedStopsRaw) savedStops = JSON.parse(savedStopsRaw);
+  } catch (e) { /* storage unavailable (e.g. inline preview sandbox), ignore */ }
+}
+function persistStops() {
+  try { localStorage.setItem(STOPS_STORAGE, JSON.stringify(savedStops)); } catch (e) {}
+}
+function saveKeyIfRemembered() {
+  try {
+    if (document.getElementById('rememberKey').checked) {
+      localStorage.setItem(KEY_STORAGE, document.getElementById('apiKey').value.trim());
+    } else {
+      localStorage.removeItem(KEY_STORAGE);
+    }
+  } catch (e) {}
+}
+document.getElementById('apiKey').addEventListener('input', (e) => { apiKey = e.target.value.trim(); saveKeyIfRemembered(); restartPolling(); });
+document.getElementById('rememberKey').addEventListener('change', saveKeyIfRemembered);
+
+// --- GPS + nearby stop lookup ---
+function useGPS() {
+  const statusEl = document.getElementById('gpsStatus');
+  if (!navigator.geolocation) {
+    statusEl.className = 'err';
+    statusEl.textContent = '⚠ Geolocation not supported by this browser.';
+    return;
+  }
+  if (!apiKey) {
+    statusEl.className = 'err';
+    statusEl.textContent = '⚠ Enter your API key first.';
+    return;
+  }
+  statusEl.className = '';
+  statusEl.textContent = 'requesting location…';
+  document.getElementById('gpsBtn').disabled = true;
+
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    userLoc = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+    statusEl.className = 'ok';
+    statusEl.textContent = `✓ location found (±${Math.round(pos.coords.accuracy)}m accuracy)`;
+    document.getElementById('gpsBtn').disabled = false;
+    await findNearbyStops();
+  }, (err) => {
+    document.getElementById('gpsBtn').disabled = false;
+    statusEl.className = 'err';
+    let msg = err.message;
+    if (err.code === 1) msg = 'Location permission denied. Enable it in your browser/site settings.';
+    if (err.code === 2) msg = 'Position unavailable — try again outdoors or with better signal.';
+    if (err.code === 3) msg = 'Location request timed out — try again.';
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+      msg += ' (Note: GPS requires https:// — this won\'t work opened as a local file.)';
+    }
+    statusEl.textContent = `⚠ ${msg}`;
+  }, { enableHighAccuracy: true, timeout: 10000 });
+}
+
+async function findNearbyStops() {
+  const listEl = document.getElementById('nearbyList');
+  listEl.innerHTML = '<div class="empty-row">searching nearby stops…</div>';
+  try {
+    const url = `https://api.wmata.com/Bus.svc/json/jStops?Lat=${userLoc.lat}&Lon=${userLoc.lon}&Radius=800`;
+    const res = await fetch(url, { headers: { 'api_key': apiKey } });
+    if (!res.ok) throw new Error(res.status === 403 ? 'Invalid API key (403)' : `HTTP ${res.status}`);
+    const data = await res.json();
+    const stops = (data.Stops || []).sort((a,b) => haversineMeters(userLoc.lat,userLoc.lon,a.Lat,a.Lon) - haversineMeters(userLoc.lat,userLoc.lon,b.Lat,b.Lon)).slice(0, 12);
+
+    if (!stops.length) { listEl.innerHTML = '<div class="empty-row">no stops found within 800m — try manual entry below</div>'; return; }
+
+    listEl.innerHTML = stops.map(s => {
+      const dist = formatDistance(haversineMeters(userLoc.lat, userLoc.lon, s.Lat, s.Lon));
+      const already = savedStops.some(sv => sv.id === s.StopID);
+      return `
+        <div class="nearby-row">
+          <div class="info">${escapeHtml(s.Name)}<span class="sub">#${escapeHtml(s.StopID)} · ${dist} · ${escapeHtml((s.Routes||[]).join(', '))}</span></div>
+          <button class="small ${already ? 'ghost' : ''}" ${already ? 'disabled' : ''} onclick='saveStop(${JSON.stringify(s.StopID)}, ${JSON.stringify(s.Name)}, ${s.Lat}, ${s.Lon})'>${already ? 'Added' : '+ Add'}</button>
+        </div>`;
+    }).join('');
+  } catch (err) {
+    listEl.innerHTML = `<div class="error-row">⚠ ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function saveStop(id, name, lat, lon) {
+  if (savedStops.some(s => s.id === id)) return;
+  savedStops.push({ id, name, lat, lon });
+  persistStops();
+  renderBoard();
+  restartPolling();
+  findNearbyStops(); // refresh "Added" state
+}
+
+function addManualStop() {
+  const input = document.getElementById('manualStopId');
+  const id = input.value.trim();
+  if (!id) return;
+  if (savedStops.some(s => s.id === id)) { input.value = ''; return; }
+  savedStops.push({ id, name: 'Stop ' + id, lat: null, lon: null });
+  input.value = '';
+  persistStops();
+  renderBoard();
+  restartPolling();
+}
+
+function removeStop(id) {
+  savedStops = savedStops.filter(s => s.id !== id);
+  persistStops();
+  if (stopMaps[id]) { stopMaps[id].map.remove(); delete stopMaps[id]; }
+  delete stopRouteIds[id];
+  renderBoard();
+  restartPolling();
+}
+
+// --- Board rendering ---
+function renderBoard() {
+  const board = document.getElementById('stopsBoard');
+  const placeholder = document.getElementById('placeholder');
+  board.innerHTML = '';
+
+  if (savedStops.length === 0) { placeholder.style.display = 'block'; return; }
+  placeholder.style.display = 'none';
+
+  savedStops.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'stop-card';
+    card.id = 'card-' + s.id;
+    card.innerHTML = `
+      <div class="stop-card-head" onclick="toggleMap('${s.id}')">
+        <h3><span class="status-dot" id="dot-${s.id}"></span>${escapeHtml(s.name)} <span class="stop-sub">#${escapeHtml(s.id)}</span></h3>
+        <div class="head-right">
+          <button class="remove-btn" onclick="event.stopPropagation(); removeStop('${s.id}')">✕</button>
+        </div>
+      </div>
+      <div class="predictions" id="pred-${s.id}"><div class="empty-row">loading…</div></div>
+      <div class="map-toggle" id="maptoggle-${s.id}" onclick="toggleMap('${s.id}')">▾ show live map</div>
+      <div class="stop-map" id="map-${s.id}"></div>
+    `;
+    board.appendChild(card);
+  });
+}
+
+function toggleMap(id) {
+  const mapEl = document.getElementById('map-' + id);
+  const toggle = document.getElementById('maptoggle-' + id);
+  const opening = !mapEl.classList.contains('open');
+  mapEl.classList.toggle('open');
+  toggle.textContent = opening ? '▴ hide live map' : '▾ show live map';
+
+  if (opening) {
+    if (!stopMaps[id]) initStopMap(id);
+    setTimeout(() => { stopMaps[id].map.invalidateSize(); }, 50);
+    updateStopMapBuses(id);
+  }
+}
+
+function initStopMap(id) {
+  const stop = savedStops.find(s => s.id === id);
+  const map = L.map('map-' + id, { zoomControl: false, attributionControl: false }).setView([stop.lat || 38.9072, stop.lon || -77.0369], 15);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19 }).addTo(map);
+
+  let stopMarker = null;
+  if (stop.lat && stop.lon) {
+    const icon = L.divIcon({ className:'', html:'<div class="stop-marker-icon"></div>', iconSize:[12,12] });
+    stopMarker = L.marker([stop.lat, stop.lon], { icon }).addTo(map).bindPopup(escapeHtml(stop.name));
+  }
+  let userMarker = null;
+  if (userLoc) {
+    const icon = L.divIcon({ className:'', html:'<div class="user-marker"></div>', iconSize:[14,14] });
+    userMarker = L.marker([userLoc.lat, userLoc.lon], { icon }).addTo(map).bindPopup('You');
+  }
+  stopMaps[id] = { map, stopMarker, userMarker, busMarkers: {} };
+}
+
+async function updateStopMapBuses(id) {
+  const routeIds = stopRouteIds[id];
+  if (!routeIds || routeIds.size === 0 || !stopMaps[id]) return;
+  const { map, busMarkers } = stopMaps[id];
+  const seen = new Set();
+
+  for (const routeId of routeIds) {
+    try {
+      const url = `https://api.wmata.com/Bus.svc/json/jBusPositions?RouteID=${encodeURIComponent(routeId)}`;
+      const res = await fetch(url, { headers: { 'api_key': apiKey } });
+      if (!res.ok) continue;
+      const data = await res.json();
+      (data.BusPositions || []).forEach(b => {
+        seen.add(b.VehicleID);
+        const routeShort = (b.RouteID || routeId).replace(/^0+/, '').slice(0, 3);
+        const icon = L.divIcon({ className:'', html:`<div class="bus-marker">${escapeHtml(routeShort)}</div>`, iconSize:[18,18] });
+        const popup = `${escapeHtml(b.RouteID)} → ${escapeHtml(b.TripHeadsign || b.DirectionText || '')}`;
+        if (busMarkers[b.VehicleID]) {
+          busMarkers[b.VehicleID].setLatLng([b.Lat, b.Lon]);
+        } else {
+          busMarkers[b.VehicleID] = L.marker([b.Lat, b.Lon], { icon }).addTo(map).bindPopup(popup);
+        }
+      });
+    } catch (e) { /* skip this route on error */ }
+  }
+  Object.keys(busMarkers).forEach(vid => {
+    if (!seen.has(vid)) { map.removeLayer(busMarkers[vid]); delete busMarkers[vid]; }
+  });
+}
+
+// --- Predictions polling ---
+async function fetchStopPredictions(stop) {
+  const dot = document.getElementById('dot-' + stop.id);
+  const predEl = document.getElementById('pred-' + stop.id);
+  if (!predEl) return;
+
+  try {
+    const url = `https://api.wmata.com/NextBusService.svc/json/jPredictions?StopID=${encodeURIComponent(stop.id)}`;
+    const res = await fetch(url, { headers: { 'api_key': apiKey } });
+    if (!res.ok) throw new Error(res.status === 403 ? 'Invalid API key (403)' : res.status === 404 ? 'Stop not found (404)' : `HTTP ${res.status}`);
+    const data = await res.json();
+    const preds = (data.Predictions || []).slice().sort((a,b) => {
+      const av = a.Minutes === '' ? 999 : Number(a.Minutes), bv = b.Minutes === '' ? 999 : Number(b.Minutes);
+      return av - bv;
+    });
+
+    if (dot) dot.classList.remove('err');
+    stopRouteIds[stop.id] = new Set(preds.map(p => p.RouteID).filter(Boolean));
+
+    if (preds.length === 0) { predEl.innerHTML = '<div class="empty-row">no buses currently predicted</div>'; }
+    else {
+      predEl.innerHTML = preds.map(p => {
+        const mins = p.Minutes === '' || p.Minutes === undefined ? '—' : p.Minutes;
+        const isDue = mins === 0 || mins === '0';
+        return `<div class="pred-row">
+          <div class="route-badge">${escapeHtml(p.RouteID || '?')}</div>
+          <div class="dest">${escapeHtml(p.DirectionText || 'Unknown direction')}</div>
+          <div class="eta">${isDue ? 'DUE' : mins}${isDue ? '' : '<small>min</small>'}</div>
+        </div>`;
+      }).join('');
+    }
+
+    const mapEl = document.getElementById('map-' + stop.id);
+    if (mapEl && mapEl.classList.contains('open')) updateStopMapBuses(stop.id);
+
+  } catch (err) {
+    if (dot) dot.classList.add('err');
+    predEl.innerHTML = `<div class="error-row">⚠ ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function pollAll() {
+  if (!apiKey || savedStops.length === 0) return;
+  savedStops.forEach(s => fetchStopPredictions(s));
+}
+function restartPolling() {
+  if (predTimer) clearInterval(predTimer);
+  pollAll();
+  predTimer = setInterval(pollAll, REFRESH_MS);
+}
+
+document.getElementById('manualStopId').addEventListener('keydown', (e) => { if (e.key === 'Enter') addManualStop(); });
+
+// --- Init ---
+loadStorage();
+renderBoard();
+restartPolling();
+if (savedStops.length > 0) document.getElementById('setup').classList.add('collapsed');
+</script>
+</body>
+</html>
