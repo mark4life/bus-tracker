@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Bus Locator // WMATA</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --bg: #f5f6f3;
+    --panel: #ffffff;
+    --panel-raised: #eef0ea;
+    --accent: #0a4fa8;
+    --accent-dim: #b9cbe8;
+    --accent-glow: rgba(10, 79, 168, 0.18);
+    --warm: #c85a10;
+    --warm-dim: #f0d4bb;
+    --warm-glow: rgba(200, 90, 16, 0.2);
+    --text-dim: #6b7069;
+    --text-mid: #23261f;
+    --line: #dcdfd7;
+    --danger: #c73224;
+    --good: #1f7a3d;
+    --mono: 'SF Mono', 'IBM Plex Mono', 'Courier New', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text-mid);
+    font-family: var(--sans);
+    height: 100%;
+  }
+
+  .wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 16px 14px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  header h1 {
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+  header h1 span { color: var(--text-dim); font-weight: normal; }
+
+  #gear {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 16px; padding: 2px 4px; cursor: pointer; line-height: 1;
+  }
+  #gear:hover { color: var(--accent); }
+
+  #setup {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  #setup.collapsed { display: none; }
+
+  label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+    margin-bottom: 5px;
+    font-weight: 600;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    background: #fbfcfa;
+    border: 1px solid var(--line);
+    color: var(--text-mid);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 9px 10px;
+    border-radius: 4px;
+    outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+
+  .field { margin-bottom: 12px; }
+
+  .row2 { display: flex; gap: 8px; align-items: flex-end; }
+  .row2 .field { flex: 1; margin-bottom: 0; }
+
+  .remember-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+  .remember-row input { width: auto; }
+
+  button {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    padding: 9px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:hover { opacity: 0.9; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  #geoStatus {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    min-height: 14px;
+  }
+  #geoStatus.err { color: var(--danger); }
+  #geoStatus.ok { color: var(--good); }
+
+  #mapCard {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+
+  #map {
+    width: 100%;
+    height: 46vh;
+    min-height: 300px;
+    background: #e8e9e5;
+  }
+
+  .route-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--panel-raised);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .route-head .status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--good);
+    display: inline-block; margin-right: 6px;
+  }
+  .route-head .status-dot.err { background: var(--danger); }
+
+  #busList { display: flex; flex-direction: column; }
+
+  .bus-row {
+    display: grid;
+    grid-template-columns: 44px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .bus-row:last-child { border-bottom: none; }
+
+  .veh-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--accent);
+    text-align: center;
+    padding: 4px 0;
+    border-radius: 3px;
+  }
+
+  .bus-info { font-size: 13px; color: var(--text-mid); }
+  .bus-info .sub {
+    display: block;
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    margin-top: 2px;
+  }
+
+  .dist {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--warm);
+    text-align: right;
+    min-width: 64px;
+  }
+  .dist small { font-size: 10px; font-weight: 400; color: var(--text-dim); margin-left: 2px; }
+
+  .dev-tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    margin-left: 6px;
+  }
+  .dev-late { background: #fbe4e0; color: var(--danger); }
+  .dev-early { background: #e1f0e5; color: var(--good); }
+  .dev-ontime { background: var(--panel-raised); color: var(--text-dim); }
+
+  /* Stops list */
+  #stopsSection { border-top: 1px solid var(--line); }
+  .stops-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 14px;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .stops-head .toggle { font-family: var(--mono); color: var(--accent); }
+  #stopsList { display: none; max-height: 220px; overflow-y: auto; }
+  #stopsList.open { display: block; }
+  .stop-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 14px;
+    font-size: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .stop-row .stop-name { color: var(--text-mid); }
+  .stop-row .stop-id { font-family: var(--mono); color: var(--text-dim); font-size: 11px; }
+
+  .empty-row, .error-row {
+    padding: 18px 14px;
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+  .error-row { color: var(--danger); }
+
+  #placeholder {
+    text-align: center;
+    padding: 50px 20px;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  #placeholder .big {
+    font-family: var(--mono);
+    color: var(--accent);
+    font-size: 26px;
+    display: block;
+    margin-bottom: 10px;
+    letter-spacing: 0.1em;
+  }
+
+  footer {
+    text-align: center;
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    letter-spacing: 0.05em;
+  }
+
+  /* Leaflet marker tweaks */
+  .user-marker {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #fff;
+    box-shadow: 0 0 0 2px var(--accent-dim);
+  }
+  .bus-marker {
+    width: 18px; height: 18px; border-radius: 4px;
+    background: var(--warm); border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 8px; font-weight: 700; color: #fff;
+  }
+  .leaflet-popup-content-wrapper {
+    background: var(--panel);
+    color: var(--text-mid);
+    font-family: var(--mono);
+    font-size: 11px;
+    border: 1px solid var(--line);
+  }
+  .leaflet-popup-tip { background: var(--panel); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>BUS LOCATOR <span>// WMATA</span></h1>
+    <button id="gear" onclick="toggleSetup()" title="Edit location/route" style="background:none;border:none;color:var(--text-dim);width:auto;">⚙</button>
+  </header>
+
+  <div id="setup">
+    <div class="row2">
+      <div class="field">
+        <label for="locInput">Your location (address / landmark)</label>
+        <input type="text" id="locInput" placeholder="e.g. 14th & U St NW, Washington DC" autocomplete="off">
+      </div>
+      <button onclick="geocode()" id="findBtn">Find</button>
+    </div>
+    <div id="geoStatus"></div>
+
+    <div class="row2" style="margin-top:14px;">
+      <div class="field">
+        <label for="apiKey">WMATA API Key</label>
+        <input type="text" id="apiKey" placeholder="paste your key" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="routeId">Route ID</label>
+        <input type="text" id="routeId" placeholder="e.g. H8, 32, 79" autocomplete="off">
+      </div>
+      <button onclick="loadRoute()" id="trackBtn">Track</button>
+    </div>
+    <div class="remember-row">
+      <input type="checkbox" id="rememberKey">
+      <label for="rememberKey" style="margin:0;">Remember API key on this device</label>
+    </div>
+  </div>
+
+  <div id="mapCard" style="display:none;">
+    <div class="route-head">
+      <span><span class="status-dot" id="dot"></span><span id="routeLabel">—</span></span>
+      <span id="updatedLabel" style="color:var(--text-dim);">—</span>
+    </div>
+    <div id="map"></div>
+    <div id="busList"></div>
+    <div id="stopsSection">
+      <div class="stops-head" onclick="toggleStops()">
+        <span id="stopsCount">Stops on this route</span>
+        <span class="toggle" id="stopsToggle">▾ show</span>
+      </div>
+      <div id="stopsList"></div>
+    </div>
+  </div>
+
+  <div id="placeholder">
+    <span class="big">&gt;_</span>
+    Enter your location and a route ID above, then hit Track to see live buses on the map.
+  </div>
+
+  <footer>positions refresh every 15s · data via api.wmata.com · geocoding via OpenStreetMap</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+let userLoc = null;       // {lat, lon, label}
+let apiKey = '';
+let routeId = '';
+let map = null;
+let userMarker = null;
+let routeLine = null;
+let stopMarkers = [];
+let busMarkers = {};      // VehicleID -> marker
+let pollTimer = null;
+let allStops = [];        // {id, name, lat, lon}
+const REFRESH_MS = 15000;
+const KEY_STORAGE = 'wmata_api_key';
+
+// Restore saved key on load (only works when this file is opened directly
+// in a browser tab -- a Claude.ai inline preview sandbox blocks localStorage)
+try {
+  const saved = localStorage.getItem(KEY_STORAGE);
+  if (saved) {
+    document.getElementById('apiKey').value = saved;
+    document.getElementById('rememberKey').checked = true;
+  }
+} catch (e) { /* storage unavailable in this context, ignore */ }
+
+document.getElementById('apiKey').addEventListener('input', saveKeyIfRemembered);
+document.getElementById('rememberKey').addEventListener('change', saveKeyIfRemembered);
+
+function saveKeyIfRemembered() {
+  try {
+    if (document.getElementById('rememberKey').checked) {
+      localStorage.setItem(KEY_STORAGE, document.getElementById('apiKey').value.trim());
+    } else {
+      localStorage.removeItem(KEY_STORAGE);
+    }
+  } catch (e) { /* storage unavailable, ignore silently */ }
+}
+
+function toggleSetup() {
+  document.getElementById('setup').classList.toggle('collapsed');
+}
+
+function toggleStops() {
+  const list = document.getElementById('stopsList');
+  const toggle = document.getElementById('stopsToggle');
+  list.classList.toggle('open');
+  toggle.textContent = list.classList.contains('open') ? '▴ hide' : '▾ show';
+}
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function formatDistance(meters) {
+  const feet = meters * 3.28084;
+  if (feet < 1000) return { val: Math.round(feet), unit: 'ft' };
+  return { val: (meters / 1609.34).toFixed(1), unit: 'mi' };
+}
+
+async function geocode() {
+  const q = document.getElementById('locInput').value.trim();
+  const statusEl = document.getElementById('geoStatus');
+  if (!q) return;
+
+  statusEl.className = '';
+  statusEl.textContent = 'looking up…';
+  document.getElementById('findBtn').disabled = true;
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const results = await res.json();
+    if (!results.length) throw new Error('No match found for that location');
+
+    const r = results[0];
+    userLoc = { lat: parseFloat(r.lat), lon: parseFloat(r.lon), label: q };
+    statusEl.className = 'ok';
+    statusEl.textContent = `✓ located: ${r.display_name.split(',').slice(0,3).join(',')}`;
+
+    if (map) placeUserMarker();
+  } catch (err) {
+    statusEl.className = 'err';
+    statusEl.textContent = `⚠ ${err.message}`;
+  } finally {
+    document.getElementById('findBtn').disabled = false;
+  }
+}
+
+function initMap() {
+  if (map) return;
+  map = L.map('map', { zoomControl: true, attributionControl: true }).setView([38.9072, -77.0369], 13);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+}
+
+function placeUserMarker() {
+  if (!userLoc) return;
+  const icon = L.divIcon({ className: '', html: '<div class="user-marker"></div>', iconSize: [14,14] });
+  if (userMarker) map.removeLayer(userMarker);
+  userMarker = L.marker([userLoc.lat, userLoc.lon], { icon }).addTo(map).bindPopup('Your location');
+  map.panTo([userLoc.lat, userLoc.lon]);
+}
+
+async function loadRoute() {
+  apiKey = document.getElementById('apiKey').value.trim();
+  routeId = document.getElementById('routeId').value.trim();
+  saveKeyIfRemembered();
+
+  if (!apiKey || !routeId) return;
+  if (!userLoc) {
+    document.getElementById('geoStatus').className = 'err';
+    document.getElementById('geoStatus').textContent = '⚠ find your location first';
+    return;
+  }
+
+  document.getElementById('placeholder').style.display = 'none';
+  document.getElementById('mapCard').style.display = 'block';
+  document.getElementById('routeLabel').textContent = 'Route ' + routeId;
+
+  initMap();
+  placeUserMarker();
+  await fetchRouteShape();
+  restartPolling();
+  document.getElementById('setup').classList.add('collapsed');
+}
+
+async function fetchRouteShape() {
+  const dot = document.getElementById('dot');
+  try {
+    const url = `https://api.wmata.com/Bus.svc/json/jRouteDetails?RouteID=${encodeURIComponent(routeId)}`;
+    const res = await fetch(url, { headers: { 'api_key': apiKey } });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      if (res.status === 403) msg = 'Invalid API key (403)';
+      if (res.status === 404) msg = 'Route not found (404)';
+      throw new Error(msg);
+    }
+    const data = await res.json();
+
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    stopMarkers.forEach(m => map.removeLayer(m));
+    stopMarkers = [];
+    allStops = [];
+
+    const directions = [data.Direction0, data.Direction1].filter(Boolean);
+    const bounds = [];
+    const seenStopIds = new Set();
+
+    directions.forEach((dir, di) => {
+      if (dir.Shape && dir.Shape.length) {
+        const latlngs = dir.Shape.map(p => [p.Lat, p.Lon]);
+        const line = L.polyline(latlngs, { color: di === 0 ? '#0a4fa8' : '#c85a10', weight: 3, opacity: 0.75 }).addTo(map);
+        if (!routeLine) routeLine = L.layerGroup([line]).addTo(map);
+        else routeLine.addLayer(line);
+        latlngs.forEach(ll => bounds.push(ll));
+      }
+      if (dir.Stops && dir.Stops.length) {
+        dir.Stops.forEach(s => {
+          const stopId = s.StopID || s.StopId || '—';
+          const m = L.circleMarker([s.Lat, s.Lon], {
+            radius: 4, color: '#23261f', fillColor: '#ffffff', fillOpacity: 1, weight: 2
+          }).addTo(map).bindPopup(`${escapeHtml(s.Name || 'Stop')}<br>Stop ID: ${escapeHtml(stopId)}`);
+          stopMarkers.push(m);
+          bounds.push([s.Lat, s.Lon]);
+
+          if (!seenStopIds.has(stopId)) {
+            seenStopIds.add(stopId);
+            allStops.push({ id: stopId, name: s.Name || 'Stop', lat: s.Lat, lon: s.Lon });
+          }
+        });
+      }
+    });
+
+    if (userLoc) bounds.push([userLoc.lat, userLoc.lon]);
+    if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
+
+    renderStopsList();
+    dot.classList.remove('err');
+  } catch (err) {
+    dot.classList.add('err');
+    document.getElementById('busList').innerHTML = `<div class="error-row">⚠ Route shape: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderStopsList() {
+  document.getElementById('stopsCount').textContent = `Stops on this route (${allStops.length})`;
+  const listEl = document.getElementById('stopsList');
+
+  const sorted = userLoc
+    ? [...allStops].sort((a, b) => haversineMeters(userLoc.lat, userLoc.lon, a.lat, a.lon) - haversineMeters(userLoc.lat, userLoc.lon, b.lat, b.lon))
+    : allStops;
+
+  listEl.innerHTML = sorted.map(s => `
+    <div class="stop-row">
+      <span class="stop-name">${escapeHtml(s.name)}</span>
+      <span class="stop-id">#${escapeHtml(s.id)}</span>
+    </div>
+  `).join('');
+}
+
+async function fetchBusPositions() {
+  const dot = document.getElementById('dot');
+  const listEl = document.getElementById('busList');
+  const updatedEl = document.getElementById('updatedLabel');
+
+  try {
+    const url = `https://api.wmata.com/Bus.svc/json/jBusPositions?RouteID=${encodeURIComponent(routeId)}`;
+    const res = await fetch(url, { headers: { 'api_key': apiKey } });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      if (res.status === 403) msg = 'Invalid API key (403)';
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    const buses = data.BusPositions || [];
+
+    dot.classList.remove('err');
+    updatedEl.textContent = 'updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+
+    const seen = new Set();
+    buses.forEach(b => {
+      seen.add(b.VehicleID);
+      const routeShort = (b.RouteID || routeId).replace(/^0+/, '').slice(0, 3);
+      const icon = L.divIcon({ className: '', html: `<div class="bus-marker">${escapeHtml(routeShort)}</div>`, iconSize: [18,18] });
+      const popupHtml = `${escapeHtml(b.RouteID)} → ${escapeHtml(b.TripHeadsign || b.DirectionText || '')}<br>veh ${escapeHtml(b.VehicleID)}`;
+
+      if (busMarkers[b.VehicleID]) {
+        busMarkers[b.VehicleID].setLatLng([b.Lat, b.Lon]);
+        busMarkers[b.VehicleID].setPopupContent(popupHtml);
+      } else {
+        busMarkers[b.VehicleID] = L.marker([b.Lat, b.Lon], { icon }).addTo(map).bindPopup(popupHtml);
+      }
+    });
+
+    Object.keys(busMarkers).forEach(vid => {
+      if (!seen.has(vid)) {
+        map.removeLayer(busMarkers[vid]);
+        delete busMarkers[vid];
+      }
+    });
+
+    if (buses.length === 0) {
+      listEl.innerHTML = '<div class="empty-row">no buses currently reporting on this route</div>';
+      return;
+    }
+
+    const withDist = buses.map(b => ({
+      ...b,
+      distM: userLoc ? haversineMeters(userLoc.lat, userLoc.lon, b.Lat, b.Lon) : null
+    })).sort((a, b2) => (a.distM ?? 0) - (b2.distM ?? 0));
+
+    listEl.innerHTML = withDist.map(b => {
+      const d = b.distM !== null ? formatDistance(b.distM) : null;
+      const dev = typeof b.Deviation === 'number' ? b.Deviation : null;
+      let devTag = '';
+      if (dev !== null) {
+        if (dev > 1) devTag = `<span class="dev-tag dev-late">${dev.toFixed(0)}m late</span>`;
+        else if (dev < -1) devTag = `<span class="dev-tag dev-early">${Math.abs(dev).toFixed(0)}m early</span>`;
+        else devTag = `<span class="dev-tag dev-ontime">on time</span>`;
+      }
+      return `
+        <div class="bus-row">
+          <div class="veh-badge">${escapeHtml(b.RouteID || routeId)}</div>
+          <div class="bus-info">
+            ${escapeHtml(b.TripHeadsign || b.DirectionText || 'Unknown direction')}${devTag}
+            <span class="sub">veh ${escapeHtml(b.VehicleID)}</span>
+          </div>
+          <div class="dist">${d ? d.val : '—'}${d ? '<small>' + d.unit + '</small>' : ''}</div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (err) {
+    dot.classList.add('err');
+    let hint = '';
+    if (err.message && err.message.includes('Failed to fetch')) {
+      hint = 'Network/CORS error — check connection or API key.';
+    }
+    listEl.innerHTML = `<div class="error-row">⚠ ${escapeHtml(err.message)}${hint ? '<br>' + hint : ''}</div>`;
+  }
+}
+
+function restartPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  fetchBusPositions();
+  pollTimer = setInterval(fetchBusPositions, REFRESH_MS);
+}
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str == null ? '' : String(str);
+  return d.innerHTML;
+}
+
+document.getElementById('locInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') geocode(); });
+document.getElementById('routeId').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadRoute(); });
+</script>
+</body>
+</html>
